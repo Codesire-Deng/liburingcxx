@@ -44,6 +44,22 @@ namespace liburingcxx {
 class URing;
 
 namespace detail {
+
+    struct URingParams : io_uring_params {
+        /**
+         * @brief Construct a new io_uring_params without initializing
+         */
+        URingParams() = default;
+
+        /**
+         * @brief Construct a new io_uring_params with memset and flags
+         */
+        URingParams(unsigned flags) {
+            memset(this, 0, sizeof(*this));
+            this->flags = flags;
+        }
+    };
+
     class SubmissionQueue {
       private:
         unsigned *khead;
@@ -55,13 +71,24 @@ namespace detail {
         unsigned *array;
         struct io_uring_sqe *sqes;
 
-        unsigned sqe_head;
-        unsigned sqe_tail;
+        unsigned sqe_head; // memset to 0 during URing()
+        unsigned sqe_tail; // memset to 0 during URing()
 
         size_t ring_sz;
         void *ring_ptr;
 
         unsigned pad[4];
+
+      private:
+        void setOffset(const io_sqring_offsets &off) noexcept {
+            khead = (unsigned *)((char *)ring_ptr + off.head);
+            ktail = (unsigned *)((char *)ring_ptr + off.tail);
+            kring_mask = (unsigned *)((char *)ring_ptr + off.ring_mask);
+            kring_entries = (unsigned *)((char *)ring_ptr + off.ring_entries);
+            kflags = (unsigned *)((char *)ring_ptr + off.flags);
+            kdropped = (unsigned *)((char *)ring_ptr + off.dropped);
+            array = (unsigned *)((char *)ring_ptr + off.array);
+        }
 
       public:
         friend class ::liburingcxx::URing;
@@ -84,25 +111,21 @@ namespace detail {
 
         unsigned pad[4];
 
+      private:
+        void setOffset(const io_cqring_offsets &off) noexcept {
+            khead = (unsigned *)((char *)ring_ptr + off.head);
+            ktail = (unsigned *)((char *)ring_ptr + off.tail);
+            kring_mask = (unsigned *)((char *)ring_ptr + off.ring_mask);
+            kring_entries = (unsigned *)((char *)ring_ptr + off.ring_entries);
+            if (off.flags) kflags = (unsigned *)((char *)ring_ptr + off.flags);
+            koverflow = (unsigned *)((char *)ring_ptr + off.overflow);
+            cqes = (io_uring_cqe *)((char *)ring_ptr + off.cqes);
+        }
+
       public:
         friend class ::liburingcxx::URing;
         CompletionQueue() = default;
         ~CompletionQueue() = default;
-    };
-
-    struct URingParams : io_uring_params {
-        /**
-         * @brief Construct a new io_uring_params without initializing
-         */
-        URingParams() = default;
-
-        /**
-         * @brief Construct a new io_uring_params with memset and flags
-         */
-        URingParams(unsigned flags) {
-            memset(this, 0, sizeof(*this));
-            this->flags = flags;
-        }
     };
 
     /*
@@ -219,15 +242,7 @@ class [[nodiscard]] URing final {
             }
         }
 
-        // clang-format off
-        sq.khead = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.head);
-        sq.ktail = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.tail);
-        sq.kring_mask = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.ring_mask);
-        sq.kring_entries = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.ring_entries);
-        sq.kflags = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.flags);
-        sq.kdropped = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.dropped);
-        sq.array = (unsigned int *)((char *)sq.ring_ptr + p.sq_off.array);
-        // clang-format on
+        sq.setOffset(p.sq_off);
 
         const size_t sqes_size = p.sq_entries * sizeof(io_uring_sqe);
         sq.sqes = reinterpret_cast<io_uring_sqe *>(mmap(
@@ -239,16 +254,7 @@ class [[nodiscard]] URing final {
                 errno, std::system_category(), "sq.sqes MAP_FAILED"};
         }
 
-        // clang-format off
-        cq.khead = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.head);
-        cq.ktail = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.tail);
-        cq.kring_mask = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.ring_mask);
-        cq.kring_entries = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.ring_entries);
-        cq.koverflow = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.overflow);
-        cq.cqes = (io_uring_cqe *)((char *)cq.ring_ptr + p.cq_off.cqes);
-        if (p.cq_off.flags)
-            cq.kflags = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.flags);
-        // clang-format on
+        cq.setOffset(p.cq_off);
     }
 
     inline void unmapRings() noexcept {
