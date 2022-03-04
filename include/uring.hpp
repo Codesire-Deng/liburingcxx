@@ -94,12 +94,12 @@ namespace detail {
         /**
          * @brief Construct a new io_uring_params without initializing
          */
-        URingParams() = default;
+        URingParams() noexcept = default;
 
         /**
          * @brief Construct a new io_uring_params with memset and flags
          */
-        URingParams(unsigned flags) {
+        explicit URingParams(unsigned flags) noexcept {
             memset(this, 0, sizeof(*this));
             this->flags = flags;
         }
@@ -132,7 +132,7 @@ namespace detail {
 
 class [[nodiscard]] URing final {
   public:
-    using Params = io_uring_params;
+    using Params = detail::URingParams;
 
   private:
     using SubmissionQueue = detail::SubmissionQueue;
