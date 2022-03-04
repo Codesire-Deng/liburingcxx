@@ -177,7 +177,7 @@ class URing final {
 
     ~URing() noexcept {
         munmap(sq.sqes, *sq.kring_entries * sizeof(io_uring_sqe));
-        unmapQueue();
+        unmapRings();
         close(ring_fd);
     }
 
@@ -202,7 +202,7 @@ class URing final {
             MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_SQ_RING);
         if (sq.ring_ptr == MAP_FAILED)
             throw std::system_error{
-                errno, std::system_category(), "MAP_FAILED"};
+                errno, std::system_category(), "sq.ring MAP_FAILED"};
 
         if (p.features & IORING_FEAT_SINGLE_MMAP) {
             cq.ring_ptr = sq.ring_ptr;
@@ -213,9 +213,9 @@ class URing final {
             if (cq.ring_ptr == MAP_FAILED) {
                 // don't forget to clean up sq
                 cq.ring_ptr = nullptr;
-                unmapQueue();
+                unmapRings();
                 throw std::system_error{
-                    errno, std::system_category(), "MAP_FAILED"};
+                    errno, std::system_category(), "cq.ring MAP_FAILED"};
             }
         }
 
@@ -234,9 +234,9 @@ class URing final {
             0, sqes_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd,
             IORING_OFF_SQES));
         if (sq.sqes == MAP_FAILED) {
-            unmapQueue();
+            unmapRings();
             throw std::system_error{
-                errno, std::system_category(), "MAP_FAILED"};
+                errno, std::system_category(), "sq.sqes MAP_FAILED"};
         }
 
         // clang-format off
@@ -254,7 +254,7 @@ class URing final {
         this->ring_fd = fd;
     }
 
-    inline void unmapQueue() noexcept {
+    inline void unmapRings() noexcept {
         munmap(sq.ring_ptr, sq.ring_sz);
         if (cq.ring_ptr && cq.ring_ptr != sq.ring_ptr)
             munmap(cq.ring_ptr, cq.ring_sz);

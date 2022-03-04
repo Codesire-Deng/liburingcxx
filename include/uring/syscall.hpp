@@ -49,16 +49,16 @@ namespace liburingcxx {
 
 namespace detail {
 
-    int __sys_io_uring_register(
+    inline int __sys_io_uring_register(
         int fd, unsigned opcode, const void *arg, unsigned nr_args) {
         return syscall(__NR_io_uring_register, fd, opcode, arg, nr_args);
     }
 
-    int __sys_io_uring_setup(unsigned entries, struct io_uring_params *p) {
+    inline int __sys_io_uring_setup(unsigned entries, struct io_uring_params *p) {
         return syscall(__NR_io_uring_setup, entries, p);
     }
 
-    int __sys_io_uring_enter2(
+    inline int __sys_io_uring_enter2(
         int fd,
         unsigned to_submit,
         unsigned min_complete,
@@ -69,7 +69,7 @@ namespace detail {
             __NR_io_uring_enter, fd, to_submit, min_complete, flags, sig, sz);
     }
 
-    int __sys_io_uring_enter(
+    inline int __sys_io_uring_enter(
         int fd,
         unsigned to_submit,
         unsigned min_complete,
