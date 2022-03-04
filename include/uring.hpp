@@ -38,6 +38,7 @@
 #include "liburing/compat.h"
 #include "liburing/io_uring.h"
 #include "liburing/barrier.h"
+#include "uring/syscall.hpp"
 
 namespace liburingcxx {
 
@@ -84,6 +85,8 @@ class SQEntry : private io_uring_sqe {
         this->__pad2[0] = this->__pad2[1] = 0;
         return *this;
     }
+
+    // TODO: more prepare
 };
 
 class CQEntry : private io_uring_cqe {
@@ -219,29 +222,6 @@ namespace detail {
         CompletionQueue() noexcept = default;
         ~CompletionQueue() noexcept = default;
     };
-
-    /*
-     * System calls
-     */
-    int __sys_io_uring_setup(unsigned entries, struct io_uring_params *p);
-
-    int __sys_io_uring_enter(
-        int fd,
-        unsigned to_submit,
-        unsigned min_complete,
-        unsigned flags,
-        sigset_t *sig);
-
-    int __sys_io_uring_enter2(
-        int fd,
-        unsigned to_submit,
-        unsigned min_complete,
-        unsigned flags,
-        sigset_t *sig,
-        int sz);
-
-    int __sys_io_uring_register(
-        int fd, unsigned int opcode, const void *arg, unsigned int nr_args);
 
 } // namespace detail
 
@@ -422,5 +402,3 @@ class [[nodiscard]] URing final {
 };
 
 } // namespace liburingcxx
-
-#include "uring/syscall.hpp"

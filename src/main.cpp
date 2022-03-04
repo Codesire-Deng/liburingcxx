@@ -22,23 +22,21 @@
 
 int main(int argc, char *argv[]) {
     using std::cout, std::endl;
-    
+
     cout << "1:\n";
-    {
-        liburingcxx::URing ring{8, 0};
-    }
+    { liburingcxx::URing ring{8, 0}; }
     cout << "2:\n";
 
-    {
-        using namespace liburingcxx;
-        using namespace detail;   
-        static_assert(std::is_standard_layout_v<URing>);
-        static_assert(!std::is_pod_v<URing>);
-        static_assert(std::is_pod_v<SQEntry>);
-        static_assert(std::is_pod_v<CQEntry>);
-        static_assert(std::is_pod_v<SubmissionQueue>);
-        static_assert(std::is_pod_v<CompletionQueue>);
-    }
+    using namespace liburingcxx;
+    using namespace detail;
+    using namespace std;
+    static_assert(is_standard_layout_v<URing> && !is_trivial_v<URing>);
+    static_assert(is_standard_layout_v<SQEntry> && is_trivial_v<SQEntry>);
+    static_assert(is_standard_layout_v<CQEntry> && is_trivial_v<CQEntry>);
+    static_assert(
+        is_standard_layout_v<SubmissionQueue> && is_trivial_v<SubmissionQueue>);
+    static_assert(
+        is_standard_layout_v<CompletionQueue> && is_trivial_v<CompletionQueue>);
 
     return 0;
 }
