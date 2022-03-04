@@ -103,7 +103,7 @@ namespace detail {
         /**
          * @brief Construct a new io_uring_params with memset and flags
          */
-        explicit URingParams(unsigned flags) {
+        explicit URingParams(unsigned flags) noexcept {
             memset(this, 0, sizeof(*this));
             this->flags = flags;
         }

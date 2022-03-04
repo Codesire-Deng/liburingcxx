@@ -18,6 +18,7 @@
  */
 #include <iostream>
 #include "uring.hpp"
+#include <type_traits>
 
 int main(int argc, char *argv[]) {
     using std::cout, std::endl;
@@ -27,6 +28,17 @@ int main(int argc, char *argv[]) {
         liburingcxx::URing ring{8, 0};
     }
     cout << "2:\n";
+
+    {
+        using namespace liburingcxx;
+        using namespace detail;   
+        static_assert(std::is_standard_layout_v<URing>);
+        static_assert(!std::is_pod_v<URing>);
+        static_assert(std::is_pod_v<SQEntry>);
+        static_assert(std::is_pod_v<CQEntry>);
+        static_assert(std::is_pod_v<SubmissionQueue>);
+        static_assert(std::is_pod_v<CompletionQueue>);
+    }
 
     return 0;
 }
