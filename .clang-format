@@ -47,7 +47,7 @@ IndentRequires: true
 IndentWrappedFunctionNames: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
-NamespaceIndentation: All
+NamespaceIndentation: Inner
 PointerAlignment: Right
 ReflowComments: true
 # RequiresClausePosition: OwnLine

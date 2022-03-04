@@ -1,3 +1,14 @@
 {
-    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "files.associations": {
+        ".clang-format": "yaml",
+        "*.clang-format": "yaml",
+        "*.cu": "cpp",
+        "io_uring.h": "c",
+        "syscall.h": "c",
+        "system_error": "cpp",
+        "cerrno": "cpp",
+        "unistd.h": "c",
+        "mman.h": "c"
+    }
 }

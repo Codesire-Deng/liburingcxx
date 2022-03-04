@@ -17,11 +17,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include <iostream>
-
+#include "uring.hpp"
 
 int main(int argc, char *argv[]) {
-    using namespace std;
-    cout << "Hello world!\n";
+    using std::cout, std::endl;
+    
+    cout << "1:\n";
+    {
+        liburingcxx::URing ring{8, 0};
+    }
+    cout << "2:\n";
 
     return 0;
 }
