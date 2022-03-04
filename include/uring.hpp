@@ -155,7 +155,7 @@ namespace detail {
 
 class [[nodiscard]] URing final {
   public:
-    using Params = io_uring_params;
+    using Params = detail::URingParams;
 
   private:
     using SubmissionQueue = detail::SubmissionQueue;
