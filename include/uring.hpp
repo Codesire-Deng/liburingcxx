@@ -43,18 +43,67 @@ namespace liburingcxx {
 
 class URing;
 
+class SQEntry : private io_uring_sqe {
+  public:
+    friend class ::liburingcxx::URing;
+
+    inline SQEntry &setData(uint64_t data) noexcept {
+        this->user_data = data;
+        return *this;
+    }
+
+    inline SQEntry &setFlags(uint8_t flags) noexcept {
+        this->flags = flags;
+        return *this;
+    }
+
+    inline SQEntry &setTargetFixedFile(uint32_t fileIndex) noexcept {
+        /* 0 means no fixed files, indexes should be encoded as "index + 1" */
+        this->file_index = fileIndex + 1;
+        return *this;
+    }
+
+    inline SQEntry &prepareRW(
+        uint8_t op,
+        int fd,
+        const void *addr,
+        uint32_t len,
+        uint64_t offset) noexcept {
+        this->opcode = op;
+        this->flags = 0;
+        this->ioprio = 0;
+        this->fd = fd;
+        this->off = offset;
+        this->addr = reinterpret_cast<uint64_t>(addr);
+        this->len = len;
+        this->rw_flags = 0;
+        this->user_data = 0;
+        this->buf_index = 0;
+        this->personality = 0;
+        this->file_index = 0;
+        this->__pad2[0] = this->__pad2[1] = 0;
+        return *this;
+    }
+};
+
+class CQEntry : private io_uring_cqe {
+  public:
+    friend class ::liburingcxx::URing;
+    inline uint64_t getData() const noexcept { return this->user_data; }
+};
+
 namespace detail {
 
     struct URingParams : io_uring_params {
         /**
          * @brief Construct a new io_uring_params without initializing
          */
-        URingParams() = default;
+        URingParams() noexcept = default;
 
         /**
          * @brief Construct a new io_uring_params with memset and flags
          */
-        URingParams(unsigned flags) {
+        explicit URingParams(unsigned flags) {
             memset(this, 0, sizeof(*this));
             this->flags = flags;
         }
@@ -135,8 +184,8 @@ namespace detail {
 
       public:
         friend class ::liburingcxx::URing;
-        SubmissionQueue() = default;
-        ~SubmissionQueue() = default;
+        SubmissionQueue() noexcept = default;
+        ~SubmissionQueue() noexcept = default;
     };
 
     class CompletionQueue {
@@ -167,8 +216,8 @@ namespace detail {
 
       public:
         friend class ::liburingcxx::URing;
-        CompletionQueue() = default;
-        ~CompletionQueue() = default;
+        CompletionQueue() noexcept = default;
+        ~CompletionQueue() noexcept = default;
     };
 
     /*
@@ -222,11 +271,11 @@ class [[nodiscard]] URing final {
         const unsigned submitted = sq.flush();
         unsigned enterFlags = 0;
 
-        if (isSqRingNeedEnter(enterFlags)) {
+        if (isSQRingNeedEnter(enterFlags)) {
             if ((this->flags & IORING_SETUP_IOPOLL))
                 enterFlags |= IORING_ENTER_GETEVENTS;
 
-            int consumedNum = detail::__sys_io_uring_enter(
+            const int consumedNum = detail::__sys_io_uring_enter(
                 ring_fd, submitted, 0, enterFlags, NULL);
 
             if (consumedNum < 0) [[unlikely]]
@@ -246,11 +295,11 @@ class [[nodiscard]] URing final {
         const unsigned submitted = sq.flush();
         unsigned enterFlags = 0;
 
-        if (waitNum || isSqRingNeedEnter(enterFlags)) {
+        if (waitNum || isSQRingNeedEnter(enterFlags)) {
             if (waitNum || (this->flags & IORING_SETUP_IOPOLL))
                 enterFlags |= IORING_ENTER_GETEVENTS;
 
-            int consumedNum = detail::__sys_io_uring_enter(
+            const int consumedNum = detail::__sys_io_uring_enter(
                 ring_fd, submitted, waitNum, enterFlags, NULL);
 
             if (consumedNum < 0) [[unlikely]]
@@ -355,7 +404,7 @@ class [[nodiscard]] URing final {
             munmap(cq.ring_ptr, cq.ring_sz);
     }
 
-    inline bool isSqRingNeedEnter(unsigned &flags) const noexcept {
+    inline bool isSQRingNeedEnter(unsigned &flags) const noexcept {
         if (!(this->flags & IORING_SETUP_SQPOLL)) return true;
 
         if (IO_URING_READ_ONCE(*sq.kflags) & IORING_SQ_NEED_WAKEUP)
@@ -365,6 +414,10 @@ class [[nodiscard]] URing final {
         }
 
         return false;
+    }
+
+    inline bool isCQRingNeedFlush() const noexcept {
+        return IO_URING_READ_ONCE(*sq.kflags) & IORING_SQ_CQ_OVERFLOW;
     }
 };
 
