@@ -90,6 +90,49 @@ namespace detail {
             array = (unsigned *)((char *)ring_ptr + off.array);
         }
 
+        /**
+         * @brief Sync internal state with kernel ring state on the SQ side.
+         *
+         * @return unsigned number of pending items in the SQ ring, for the
+         * shared ring.
+         */
+        unsigned flush() noexcept {
+            const unsigned mask = *kring_mask;
+            unsigned tail = *ktail;
+            unsigned to_submit = sqe_tail - sqe_head;
+            if (to_submit == 0) return tail - *khead; // see below
+
+            /*
+             * Fill in sqes that we have queued up, adding them to the kernel
+             * ring
+             */
+            do {
+                array[tail & mask] = sqe_head & mask;
+                tail++;
+                sqe_head++;
+            } while (--to_submit);
+
+            /*
+             * Ensure that the kernel sees the SQE updates before it sees the
+             * tail update.
+             */
+            io_uring_smp_store_release(ktail, tail);
+
+            /*
+             * This _may_ look problematic, as we're not supposed to be reading
+             * SQ->head without acquire semantics. When we're in SQPOLL mode,
+             * the kernel submitter could be updating this right now. For
+             * non-SQPOLL, task itself does it, and there's no potential race.
+             * But even for SQPOLL, the load is going to be potentially
+             * out-of-date the very instant it's done, regardless or whether or
+             * not it's done atomically. Worst case, we're going to be
+             * over-estimating what we can submit. The point is, we need to be
+             * able to deal with this situation regardless of any perceived
+             * atomicity.
+             */
+            return tail - *khead;
+        }
+
       public:
         friend class ::liburingcxx::URing;
         SubmissionQueue() = default;
@@ -168,6 +211,55 @@ class [[nodiscard]] URing final {
 
     unsigned features;
     unsigned pad[3];
+
+  public:
+    /**
+     * @brief Submit sqes acquired from io_uring_get_sqe() to the kernel.
+     *
+     * @return unsigned number of sqes submitted
+     */
+    unsigned submit() {
+        const unsigned submitted = sq.flush();
+        unsigned enterFlags = 0;
+
+        if (isSqRingNeedEnter(enterFlags)) {
+            if ((this->flags & IORING_SETUP_IOPOLL))
+                enterFlags |= IORING_ENTER_GETEVENTS;
+
+            int consumedNum = detail::__sys_io_uring_enter(
+                ring_fd, submitted, 0, enterFlags, NULL);
+
+            if (consumedNum < 0) [[unlikely]]
+                throw std::system_error{
+                    errno, std::system_category(), "submitAndWait"};
+        }
+
+        return submitted;
+    }
+
+    /**
+     * @brief Submit sqes acquired from io_uring_get_sqe() to the kernel.
+     *
+     * @return unsigned number of sqes submitted
+     */
+    unsigned submitAndWait(unsigned waitNum) {
+        const unsigned submitted = sq.flush();
+        unsigned enterFlags = 0;
+
+        if (waitNum || isSqRingNeedEnter(enterFlags)) {
+            if (waitNum || (this->flags & IORING_SETUP_IOPOLL))
+                enterFlags |= IORING_ENTER_GETEVENTS;
+
+            int consumedNum = detail::__sys_io_uring_enter(
+                ring_fd, submitted, waitNum, enterFlags, NULL);
+
+            if (consumedNum < 0) [[unlikely]]
+                throw std::system_error{
+                    errno, std::system_category(), "submitAndWait"};
+        }
+
+        return submitted;
+    }
 
   public:
     URing(unsigned entries, Params &params) {
@@ -261,6 +353,18 @@ class [[nodiscard]] URing final {
         munmap(sq.ring_ptr, sq.ring_sz);
         if (cq.ring_ptr && cq.ring_ptr != sq.ring_ptr)
             munmap(cq.ring_ptr, cq.ring_sz);
+    }
+
+    inline bool isSqRingNeedEnter(unsigned &flags) const noexcept {
+        if (!(this->flags & IORING_SETUP_SQPOLL)) return true;
+
+        if (IO_URING_READ_ONCE(*sq.kflags) & IORING_SQ_NEED_WAKEUP)
+            [[unlikely]] {
+            flags |= IORING_ENTER_SQ_WAKEUP;
+            return true;
+        }
+
+        return false;
     }
 };
 
