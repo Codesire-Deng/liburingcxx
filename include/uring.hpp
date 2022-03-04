@@ -130,7 +130,7 @@ namespace detail {
 
 } // namespace detail
 
-class URing final {
+class [[nodiscard]] URing final {
   public:
     using Params = io_uring_params;
 
@@ -149,7 +149,7 @@ class URing final {
   public:
     URing(unsigned entries, Params &params) {
         const int fd = detail::__sys_io_uring_setup(entries, &params);
-        if (fd < 0)
+        if (fd < 0) [[unlikely]]
             throw std::system_error{
                 errno, std::system_category(), "__sys_io_uring_setup"};
 
@@ -200,7 +200,7 @@ class URing final {
         sq.ring_ptr = mmap(
             nullptr, sq.ring_sz, PROT_READ | PROT_WRITE,
             MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_SQ_RING);
-        if (sq.ring_ptr == MAP_FAILED)
+        if (sq.ring_ptr == MAP_FAILED) [[unlikely]]
             throw std::system_error{
                 errno, std::system_category(), "sq.ring MAP_FAILED"};
 
@@ -210,7 +210,7 @@ class URing final {
             cq.ring_ptr = mmap(
                 nullptr, cq.ring_sz, PROT_READ | PROT_WRITE,
                 MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_CQ_RING);
-            if (cq.ring_ptr == MAP_FAILED) {
+            if (cq.ring_ptr == MAP_FAILED) [[unlikely]] {
                 // don't forget to clean up sq
                 cq.ring_ptr = nullptr;
                 unmapRings();
@@ -233,7 +233,7 @@ class URing final {
         sq.sqes = reinterpret_cast<io_uring_sqe *>(mmap(
             0, sqes_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd,
             IORING_OFF_SQES));
-        if (sq.sqes == MAP_FAILED) {
+        if (sq.sqes == MAP_FAILED) [[unlikely]] {
             unmapRings();
             throw std::system_error{
                 errno, std::system_category(), "sq.sqes MAP_FAILED"};
