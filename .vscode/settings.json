@@ -54,6 +54,7 @@
         "iostream": "cpp",
         "limits": "cpp",
         "numbers": "cpp",
-        "cinttypes": "cpp"
+        "cinttypes": "cpp",
+        "span": "cpp"
     }
 }

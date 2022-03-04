@@ -35,6 +35,7 @@
 #include <linux/swab.h>
 #include <system_error>
 #include <cstring>
+#include <span>
 #include "liburing/compat.h"
 #include "liburing/io_uring.h"
 #include "liburing/barrier.h"
@@ -86,7 +87,33 @@ class SQEntry : private io_uring_sqe {
         return *this;
     }
 
-    // TODO: more prepare
+    inline SQEntry &
+    prepareReadv(int fd, std::span<iovec> iovecs, uint64_t offset) noexcept {
+        return prepareRW(
+            IORING_OP_READV, fd, iovecs.data(), iovecs.size(), offset);
+    }
+
+    inline SQEntry &
+    prepareWritev(int fd, std::span<iovec> iovecs, uint64_t offset) noexcept {
+        return prepareRW(
+            IORING_OP_WRITEV, fd, iovecs.data(), iovecs.size(), offset);
+    }
+
+    inline SQEntry &
+    prepareRead(int fd, std::span<char> buf, uint64_t offset) noexcept {
+        return prepareRW(
+            IORING_OP_READ, fd, buf.data(), buf.size(), offset);
+    }
+
+    inline SQEntry &
+    prepareWrite(int fd, std::span<char> buf, uint64_t offset) noexcept {
+        return prepareRW(
+            IORING_OP_WRITE, fd, buf.data(), buf.size(), offset);
+    }
+
+    /* TODO: more prepare: splice, tee, read_fixed, write_fixed
+     * ......
+     */
 };
 
 class CQEntry : private io_uring_cqe {
