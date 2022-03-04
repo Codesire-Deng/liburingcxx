@@ -19,6 +19,7 @@
 #include <iostream>
 #include "uring.hpp"
 #include <type_traits>
+#include <liburing.h>
 
 int main(int argc, char *argv[]) {
     using std::cout, std::endl;
@@ -37,6 +38,12 @@ int main(int argc, char *argv[]) {
         is_standard_layout_v<SubmissionQueue> && is_trivial_v<SubmissionQueue>);
     static_assert(
         is_standard_layout_v<CompletionQueue> && is_trivial_v<CompletionQueue>);
+
+    static_assert(sizeof(io_uring_sqe) == sizeof(SQEntry));
+    static_assert(sizeof(io_uring_cqe) == sizeof(CQEntry));
+    static_assert(sizeof(URing) == sizeof(io_uring));
+    static_assert(sizeof(io_uring_sq) == sizeof(SubmissionQueue));
+    static_assert(sizeof(io_uring_cq) == sizeof(CompletionQueue));
 
     return 0;
 }

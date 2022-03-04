@@ -290,6 +290,76 @@ class [[nodiscard]] URing final {
         return submitted;
     }
 
+    /**
+     * @brief Returns number of unconsumed (if SQPOLL) or unsubmitted entries
+     * exist in the SQ ring
+     */
+    inline unsigned SQReady() const noexcept {
+        /*
+         * Without a barrier, we could miss an update and think the SQ wasn't
+         * ready. We don't need the load acquire for non-SQPOLL since then we
+         * drive updates.
+         */
+        if (flags & IORING_SETUP_SQPOLL)
+            return sq.sqe_tail - io_uring_smp_load_acquire(sq.khead);
+
+        /* always use real head, to avoid losing sync for short submit */
+        return sq.sqe_tail - *sq.khead;
+    }
+
+    /**
+     * @brief Returns how much space is left in the SQ ring.
+     *
+     * @return unsigned the available space in SQ ring
+     */
+    inline unsigned SQSpaceLeft() const noexcept {
+        return *sq.kring_entries - SQReady();
+    }
+
+    /**
+     * @brief Return an sqe to fill. User must later call submit().
+     *
+     * @details Return an sqe to fill. Application must later call
+     * io_uring_submit() when it's ready to tell the kernel about it. The caller
+     * may call this function multiple times before calling submit().
+     *
+     * @return SQEntry* Returns a vacant sqe, or nullptr if we're full.
+     */
+    inline SQEntry *getSQEntry() noexcept {
+        const unsigned int head = io_uring_smp_load_acquire(sq.khead);
+        const unsigned int next = sq.sqe_tail + 1;
+        SQEntry *sqe = nullptr;
+        if (next - head <= *sq.kring_entries) {
+            sqe = reinterpret_cast<SQEntry *>(
+                sq.sqes + (sq.sqe_tail & *sq.kring_mask));
+            sq.sqe_tail = next;
+        }
+        return sqe;
+    }
+
+    /**
+     * @brief wait until the SQ ring is not full
+     *
+     * @details Only applicable when using SQPOLL - allows the caller to wait
+     * for space to free up in the SQ ring, which happens when the kernel side
+     * thread has consumed one or more entries. If the SQ ring is currently
+     * non-full, no action is taken. Note: may return -EINVAL if the kernel
+     * doesn't support this feature.
+     *
+     * @return what I don't know
+     */
+    inline int SQRingWait() {
+        if (!(flags & IORING_SETUP_SQPOLL)) return 0;
+        if (SQSpaceLeft()) return 0;
+        const int result = detail::__sys_io_uring_enter(
+            ring_fd, 0, 0, IORING_ENTER_SQ_WAIT, nullptr);
+        if (result < 0)
+            throw std::system_error{
+                errno, std::system_category(),
+                "SQRingWait __sys_io_uring_enter"};
+        return result;
+    }
+
   public:
     URing(unsigned entries, Params &params) {
         const int fd = detail::__sys_io_uring_setup(entries, &params);
