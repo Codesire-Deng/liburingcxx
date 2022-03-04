@@ -45,7 +45,7 @@ class URing;
 
 namespace detail {
     class SubmissionQueue {
-      public:
+      private:
         unsigned *khead;
         unsigned *ktail;
         unsigned *kring_mask;
@@ -64,13 +64,13 @@ namespace detail {
         unsigned pad[4];
 
       public:
-        friend class URing;
+        friend class ::liburingcxx::URing;
         SubmissionQueue() = default;
         ~SubmissionQueue() = default;
     };
 
     class CompletionQueue {
-      public:
+      private:
         unsigned *khead;
         unsigned *ktail;
         unsigned *kring_mask;
@@ -85,7 +85,7 @@ namespace detail {
         unsigned pad[4];
 
       public:
-        friend class URing;
+        friend class ::liburingcxx::URing;
         CompletionQueue() = default;
         ~CompletionQueue() = default;
     };
@@ -153,14 +153,16 @@ class [[nodiscard]] URing final {
             throw std::system_error{
                 errno, std::system_category(), "__sys_io_uring_setup"};
 
+        memset(this, 0, sizeof(*this));
+        this->flags = params.flags;
+        this->ring_fd = fd;
+        this->features = params.features;
         try {
             mmapQueue(fd, params);
         } catch (...) {
             close(fd);
             std::rethrow_exception(std::current_exception());
         }
-
-        this->features = params.features;
     }
 
     URing(unsigned entries, Params &&params) : URing(entries, params) {}
@@ -189,8 +191,6 @@ class [[nodiscard]] URing final {
      * @param p params describing the shape of ring
      */
     void mmapQueue(int fd, Params &p) {
-        memset(this, 0, sizeof(*this));
-
         sq.ring_sz = p.sq_off.array + p.sq_entries * sizeof(unsigned);
         cq.ring_sz = p.cq_off.cqes + p.cq_entries * sizeof(io_uring_cqe);
 
@@ -249,9 +249,6 @@ class [[nodiscard]] URing final {
         if (p.cq_off.flags)
             cq.kflags = (unsigned int *)((char *)cq.ring_ptr + p.cq_off.flags);
         // clang-format on
-
-        this->flags = p.flags;
-        this->ring_fd = fd;
     }
 
     inline void unmapRings() noexcept {
