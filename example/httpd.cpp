@@ -30,7 +30,9 @@ struct request {
     struct iovec iov[];
 };
 
-liburingcxx::URing ring{QUEUE_DEPTH, 0};
+using URing = liburingcxx::URing<0>;
+
+URing ring{QUEUE_DEPTH};
 
 const char *unimplemented_content =
     "HTTP/1.0 400 Bad Request\r\n"

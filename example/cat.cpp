@@ -38,8 +38,10 @@ void output(std::string_view s) noexcept {
     for (char c : s) putchar(c);
 }
 
+using URing = liburingcxx::URing<0>;
+
 void submitReadRequest(
-    liburingcxx::URing &ring, const std::filesystem::path path) {
+    URing &ring, const std::filesystem::path path) {
 
     // open the file
     int file_fd = open(path.c_str(), O_RDONLY);
@@ -75,7 +77,7 @@ void submitReadRequest(
 
 
 
-void waitResultAndPrint(liburingcxx::URing &ring) {
+void waitResultAndPrint(URing &ring) {
     // get a result from the ring
     liburingcxx::CQEntry &cqe = *ring.waitCQEntry();
 
@@ -100,7 +102,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    liburingcxx::URing ring{4, 0};
+    URing ring{4};
 
     for (int i = 1; i < argc; ++i) {
         try {

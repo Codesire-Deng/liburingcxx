@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
     using namespace liburingcxx;
     using namespace detail;
     using namespace std;
-    static_assert(is_standard_layout_v<URing> && !is_trivial_v<URing>);
+    static_assert(is_standard_layout_v<URing<0>> && !is_trivial_v<URing<0>>);
     static_assert(is_standard_layout_v<SQEntry> && is_trivial_v<SQEntry>);
     static_assert(is_standard_layout_v<CQEntry> && is_trivial_v<CQEntry>);
     static_assert(
@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
 
     static_assert(sizeof(io_uring_sqe) == sizeof(SQEntry));
     static_assert(sizeof(io_uring_cqe) == sizeof(CQEntry));
-    static_assert(sizeof(URing) == sizeof(io_uring));
+    // static_assert(sizeof(URing) == sizeof(io_uring));
     static_assert(sizeof(io_uring_sq) == sizeof(SubmissionQueue));
     static_assert(sizeof(io_uring_cq) == sizeof(CompletionQueue));
 

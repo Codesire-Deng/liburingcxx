@@ -46,10 +46,12 @@ namespace liburingcxx {
 
 constexpr uint64_t LIBURING_UDATA_TIMEOUT = -1;
 
+template<unsigned URingFlags>
 class URing;
 
 class SQEntry : private io_uring_sqe {
   public:
+    template<unsigned URingFlags>
     friend class ::liburingcxx::URing;
 
     inline SQEntry &setData(uint64_t data) noexcept {
@@ -227,6 +229,7 @@ class SQEntry : private io_uring_sqe {
 
 class CQEntry : private io_uring_cqe {
   public:
+    template<unsigned URingFlags>
     friend class ::liburingcxx::URing;
     inline uint64_t getData() const noexcept { return this->user_data; }
     inline int32_t getRes() const noexcept { return this->res; }
@@ -323,6 +326,7 @@ namespace detail {
         }
 
       public:
+        template<unsigned URingFlags>
         friend class ::liburingcxx::URing;
         SubmissionQueue() noexcept = default;
         ~SubmissionQueue() noexcept = default;
@@ -355,6 +359,7 @@ namespace detail {
         }
 
       public:
+        template<unsigned URingFlags>
         friend class ::liburingcxx::URing;
         CompletionQueue() noexcept = default;
         ~CompletionQueue() noexcept = default;
@@ -370,6 +375,7 @@ namespace detail {
 
 } // namespace detail
 
+template<unsigned URingFlags>
 class [[nodiscard]] URing final {
   public:
     using Params = detail::URingParams;
@@ -380,11 +386,11 @@ class [[nodiscard]] URing final {
 
     SubmissionQueue sq;
     CompletionQueue cq;
-    unsigned flags;
+    // unsigned flags; // is now URingFlags
     int ring_fd;
 
     unsigned features;
-    unsigned pad[3];
+    // unsigned pad[3];
 
   public:
     /**
@@ -397,7 +403,7 @@ class [[nodiscard]] URing final {
         unsigned enterFlags = 0;
 
         if (isSQRingNeedEnter(enterFlags)) {
-            if ((this->flags & IORING_SETUP_IOPOLL))
+            if constexpr (URingFlags & IORING_SETUP_IOPOLL)
                 enterFlags |= IORING_ENTER_GETEVENTS;
 
             const int consumedNum = detail::__sys_io_uring_enter(
@@ -421,7 +427,7 @@ class [[nodiscard]] URing final {
         unsigned enterFlags = 0;
 
         if (waitNum || isSQRingNeedEnter(enterFlags)) {
-            if (waitNum || (this->flags & IORING_SETUP_IOPOLL))
+            if (waitNum || (URingFlags & IORING_SETUP_IOPOLL))
                 enterFlags |= IORING_ENTER_GETEVENTS;
 
             const int consumedNum = detail::__sys_io_uring_enter(
@@ -445,7 +451,7 @@ class [[nodiscard]] URing final {
          * ready. We don't need the load acquire for non-SQPOLL since then we
          * drive updates.
          */
-        if (flags & IORING_SETUP_SQPOLL)
+        if constexpr (URingFlags & IORING_SETUP_SQPOLL)
             return sq.sqe_tail - io_uring_smp_load_acquire(sq.khead);
 
         /* always use real head, to avoid losing sync for short submit */
@@ -494,7 +500,7 @@ class [[nodiscard]] URing final {
      * @return what I don't know
      */
     inline int SQRingWait() {
-        if (!(flags & IORING_SETUP_SQPOLL)) return 0;
+        if constexpr (!(URingFlags & IORING_SETUP_SQPOLL)) return 0;
         if (SQSpaceLeft()) return 0;
         const int result = detail::__sys_io_uring_enter(
             ring_fd, 0, 0, IORING_ENTER_SQ_WAIT, nullptr);
@@ -520,13 +526,15 @@ class [[nodiscard]] URing final {
 
   public:
     URing(unsigned entries, Params &params) {
+        // override the params.flags
+        params.flags = URingFlags;
         const int fd = detail::__sys_io_uring_setup(entries, &params);
         if (fd < 0) [[unlikely]]
             throw std::system_error{
                 errno, std::system_category(), "__sys_io_uring_setup"};
 
         memset(this, 0, sizeof(*this));
-        this->flags = params.flags;
+        // this->flags = params.flags;
         this->ring_fd = fd;
         this->features = params.features;
         try {
@@ -539,7 +547,7 @@ class [[nodiscard]] URing final {
 
     URing(unsigned entries, Params &&params) : URing(entries, params) {}
 
-    URing(unsigned entries, unsigned flags) : URing(entries, Params{flags}) {}
+    URing(unsigned entries) : URing(entries, Params{URingFlags}) {}
 
     /**
      * ban all copying or moving
@@ -613,7 +621,7 @@ class [[nodiscard]] URing final {
     }
 
     inline bool isSQRingNeedEnter(unsigned &flags) const noexcept {
-        if (!(this->flags & IORING_SETUP_SQPOLL)) return true;
+        if constexpr (!(URingFlags & IORING_SETUP_SQPOLL)) return true;
 
         if (IO_URING_READ_ONCE(*sq.kflags) & IORING_SQ_NEED_WAKEUP)
             [[unlikely]] {
