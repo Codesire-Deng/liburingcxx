@@ -10,7 +10,8 @@ add_definitions(-DDEBUG)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-add_subdirectory(./src)
+add_subdirectory(./test)
+add_subdirectory(./example)
 
 # include(CTest)
 # enable_testing()
