@@ -90,16 +90,36 @@ class SQEntry : private io_uring_sqe {
         return *this;
     }
 
-    inline SQEntry &
-    prepareReadv(int fd, std::span<iovec> iovecs, uint64_t offset) noexcept {
+    inline SQEntry &prepareReadv(
+        int fd, std::span<const iovec> iovecs, uint64_t offset) noexcept {
         return prepareRW(
             IORING_OP_READV, fd, iovecs.data(), iovecs.size(), offset);
     }
 
-    inline SQEntry &
-    prepareWritev(int fd, std::span<iovec> iovecs, uint64_t offset) noexcept {
+    inline SQEntry &prepareReadFixed(
+        int fd,
+        std::span<char> buf,
+        uint64_t offset,
+        uint16_t bufIndex) noexcept {
+        prepareRW(IORING_OP_READ_FIXED, fd, buf.data(), buf.size(), offset);
+        this->buf_index = bufIndex;
+        return *this;
+    }
+
+    inline SQEntry &prepareWritev(
+        int fd, std::span<const iovec> iovecs, uint64_t offset) noexcept {
         return prepareRW(
             IORING_OP_WRITEV, fd, iovecs.data(), iovecs.size(), offset);
+    }
+
+    inline SQEntry &prepareWriteFixed(
+        int fd,
+        std::span<char> buf,
+        uint64_t offset,
+        uint16_t bufIndex) noexcept {
+        prepareRW(IORING_OP_WRITE_FIXED, fd, buf.data(), buf.size(), offset);
+        this->buf_index = bufIndex;
+        return *this;
     }
 
     inline SQEntry &
@@ -108,11 +128,99 @@ class SQEntry : private io_uring_sqe {
     }
 
     inline SQEntry &
-    prepareWrite(int fd, std::span<char> buf, uint64_t offset) noexcept {
+    prepareWrite(int fd, std::span<const char> buf, uint64_t offset) noexcept {
         return prepareRW(IORING_OP_WRITE, fd, buf.data(), buf.size(), offset);
     }
 
-    /* TODO: more prepare: splice, tee, read_fixed, write_fixed
+    inline SQEntry &
+    prepareRecvmsg(int fd, msghdr *msg, unsigned flags) noexcept {
+        return prepareRW(IORING_OP_RECVMSG, fd, msg, 1, 0);
+        this->msg_flags = flags;
+        return *this;
+    }
+
+    inline SQEntry &
+    prepareSendmsg(int fd, const msghdr *msg, unsigned flags) noexcept {
+        return prepareRW(IORING_OP_SENDMSG, fd, msg, 1, 0);
+        this->msg_flags = flags;
+        return *this;
+    }
+
+    inline SQEntry &prepareNop() noexcept {
+        return prepareRW(IORING_OP_NOP, -1, nullptr, 0, 0);
+    }
+
+    inline SQEntry &prepareTimeout(
+        __kernel_timespec *ts, unsigned count, unsigned flags) noexcept {
+        prepareRW(IORING_OP_TIMEOUT, -1, ts, 1, count);
+        this->timeout_flags = flags;
+        return *this;
+    }
+
+    inline SQEntry &
+    prepareTimeoutRemove(uint64_t user_data, unsigned flags) noexcept {
+        prepareRW(
+            IORING_OP_TIMEOUT_REMOVE, -1, reinterpret_cast<void *>(user_data),
+            0, 0);
+        this->timeout_flags = flags;
+        return *this;
+    }
+
+    inline SQEntry &prepareTimeoutUpdate(
+        __kernel_timespec *ts, uint64_t user_data, unsigned flags) noexcept {
+        prepareRW(
+            IORING_OP_TIMEOUT_REMOVE, -1, reinterpret_cast<void *>(user_data),
+            0, (uintptr_t)ts);
+        this->timeout_flags = flags | IORING_TIMEOUT_UPDATE;
+        return *this;
+    }
+
+    inline SQEntry &prepareAccept(
+        int fd, sockaddr *addr, socklen_t *addrlen, int flags) noexcept {
+        prepareRW(IORING_OP_ACCEPT, fd, addr, 0, (uint64_t)addrlen);
+        this->accept_flags = (uint32_t)flags;
+        return *this;
+    }
+
+    inline SQEntry &prepareAcceptDirect(
+        int fd,
+        sockaddr *addr,
+        socklen_t *addrlen,
+        int flags,
+        uint32_t fileIndex) noexcept {
+        prepareAccept(fd, addr, addrlen, flags);
+        setTargetFixedFile(fileIndex);
+        return *this;
+    }
+
+    inline SQEntry &
+    prepareConnect(int fd, const sockaddr *addr, socklen_t addrlen) noexcept {
+        return prepareRW(IORING_OP_CONNECT, fd, addr, 0, addrlen);
+    }
+
+    inline SQEntry &prepareClose(int fd) noexcept {
+        return prepareRW(IORING_OP_CLOSE, fd, nullptr, 0, 0);
+    }
+
+    inline SQEntry &
+    prepareSend(int sockfd, std::span<const char> buf, int flags) noexcept {
+        return prepareRW(IORING_OP_SEND, sockfd, buf.data(), buf.size(), 0);
+        this->msg_flags = (uint32_t)flags;
+        return *this;
+    }
+
+    inline SQEntry &
+    prepareRecv(int sockfd, std::span<char> buf, int flags) noexcept {
+        return prepareRW(IORING_OP_RECV, sockfd, buf.data(), buf.size(), 0);
+        this->msg_flags = (uint32_t)flags;
+        return *this;
+    }
+
+    inline SQEntry &prepareShutdown(int fd, int how) noexcept {
+        return prepareRW(IORING_OP_SHUTDOWN, fd, nullptr, (uint32_t)how, 0);
+    }
+
+    /* TODO: more prepare: splice, tee, cancel, epoll_ctl
      * ......
      */
 };
@@ -396,19 +504,15 @@ class [[nodiscard]] URing final {
         return result;
     }
 
-    inline CQEntry* waitCQEntry() {
-        return waitCQEntryNum(1);
+    inline CQEntry *waitCQEntry() { return waitCQEntryNum(1); }
+
+    inline CQEntry *peekCQEntry() { return waitCQEntryNum(0); }
+
+    inline CQEntry *waitCQEntryNum(unsigned num) {
+        return getCQEntry(/* submit */ 0, num, /* sigmask */ nullptr);
     }
 
-    inline CQEntry* peekCQEntry() {
-        return waitCQEntryNum(0);
-    }
-
-    inline CQEntry * waitCQEntryNum(unsigned num) {
-        return getCQEntry(/* submit */0, num, /* sigmask */nullptr);
-    }
-
-    inline void SeenCQEntry(CQEntry * cqe) noexcept {
+    inline void SeenCQEntry(CQEntry *cqe) noexcept {
         assert(cqe != nullptr);
         CQAdvance(1);
     }
@@ -589,8 +693,8 @@ class [[nodiscard]] URing final {
             const int result = detail::__sys_io_uring_enter2(
                 ring_fd, data.submit, data.waitNum, flags, (sigset_t *)data.arg,
                 data.size);
-            
-            if (result < 0) 
+
+            if (result < 0)
                 // TODO Reconsider whether to use exceptions
                 throw std::system_error{
                     errno, std::system_category(), "getCQEntry_impl.2"};

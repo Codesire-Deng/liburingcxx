@@ -56,6 +56,12 @@
         "numbers": "cpp",
         "cinttypes": "cpp",
         "span": "cpp",
-        "stat.h": "c"
+        "stat.h": "c",
+        "chrono": "cpp",
+        "codecvt": "cpp",
+        "ctime": "cpp",
+        "ratio": "cpp",
+        "iomanip": "cpp",
+        "sstream": "cpp"
     }
 }
