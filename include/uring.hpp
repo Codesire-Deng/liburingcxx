@@ -36,12 +36,15 @@
 #include <system_error>
 #include <cstring>
 #include <span>
+#include <cassert>
 #include "liburing/compat.h"
 #include "liburing/io_uring.h"
 #include "liburing/barrier.h"
 #include "uring/syscall.hpp"
 
 namespace liburingcxx {
+
+constexpr uint64_t LIBURING_UDATA_TIMEOUT = -1;
 
 class URing;
 
@@ -101,14 +104,12 @@ class SQEntry : private io_uring_sqe {
 
     inline SQEntry &
     prepareRead(int fd, std::span<char> buf, uint64_t offset) noexcept {
-        return prepareRW(
-            IORING_OP_READ, fd, buf.data(), buf.size(), offset);
+        return prepareRW(IORING_OP_READ, fd, buf.data(), buf.size(), offset);
     }
 
     inline SQEntry &
     prepareWrite(int fd, std::span<char> buf, uint64_t offset) noexcept {
-        return prepareRW(
-            IORING_OP_WRITE, fd, buf.data(), buf.size(), offset);
+        return prepareRW(IORING_OP_WRITE, fd, buf.data(), buf.size(), offset);
     }
 
     /* TODO: more prepare: splice, tee, read_fixed, write_fixed
@@ -250,6 +251,14 @@ namespace detail {
         ~CompletionQueue() noexcept = default;
     };
 
+    struct CQEGetter {
+        unsigned submit;
+        unsigned waitNum;
+        unsigned getFlags;
+        int size;
+        void *arg;
+    };
+
 } // namespace detail
 
 class [[nodiscard]] URing final {
@@ -387,6 +396,23 @@ class [[nodiscard]] URing final {
         return result;
     }
 
+    inline CQEntry* waitCQEntry() {
+        return waitCQEntryNum(1);
+    }
+
+    inline CQEntry* peekCQEntry() {
+        return waitCQEntryNum(0);
+    }
+
+    inline CQEntry * waitCQEntryNum(unsigned num) {
+        return getCQEntry(/* submit */0, num, /* sigmask */nullptr);
+    }
+
+    inline void SeenCQEntry(CQEntry * cqe) noexcept {
+        assert(cqe != nullptr);
+        CQAdvance(1);
+    }
+
   public:
     URing(unsigned entries, Params &params) {
         const int fd = detail::__sys_io_uring_setup(entries, &params);
@@ -495,6 +521,93 @@ class [[nodiscard]] URing final {
 
     inline bool isCQRingNeedFlush() const noexcept {
         return IO_URING_READ_ONCE(*sq.kflags) & IORING_SQ_CQ_OVERFLOW;
+    }
+
+    inline void CQAdvance(unsigned num) noexcept {
+        assert(num > 0 && "CQAdvance: num must be positive.");
+        io_uring_smp_store_release(cq.khead, *cq.khead + num);
+    }
+
+    auto __peekCQEntry() {
+        struct ReturnType {
+            CQEntry *cqe;
+            unsigned availableNum;
+        } ret;
+        const unsigned mask = *cq.kring_mask;
+
+        while (true) {
+            const unsigned tail = io_uring_smp_load_acquire(cq.ktail);
+            const unsigned head = *cq.khead;
+
+            ret.cqe = nullptr;
+            ret.availableNum = tail - head;
+            if (ret.availableNum == 0) return ret;
+
+            ret.cqe = reinterpret_cast<CQEntry *>(cq.cqes + (head & mask));
+            if (!(this->features & IORING_FEAT_EXT_ARG)
+                && ret.cqe->user_data == LIBURING_UDATA_TIMEOUT) {
+                CQAdvance(1);
+                if (ret.cqe->res < 0) [[unlikely]] {
+                    // TODO Reconsider whether to use exceptions
+                    throw std::system_error{
+                        ret.cqe->res, std::system_category(), "__peekCQEntry"};
+                } else {
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        return ret;
+    }
+
+    CQEntry *getCQEntry(detail::CQEGetter &data) {
+        while (true) {
+            bool isNeedEnter = false;
+            bool isCQOverflowFlush = false;
+            unsigned flags = 0;
+
+            auto [cqe, availableNum] = __peekCQEntry();
+            if (cqe == nullptr && data.waitNum == 0 && data.submit == 0) {
+                if (!isCQRingNeedFlush())
+                    // TODO Reconsider whether to use exceptions
+                    throw std::system_error{
+                        EAGAIN, std::system_category(), "getCQEntry_impl.1"};
+                isCQOverflowFlush = true;
+            }
+            if (data.waitNum > availableNum || isCQOverflowFlush) {
+                flags = IORING_ENTER_GETEVENTS | data.getFlags;
+                isNeedEnter = true;
+            }
+            if (data.submit) {
+                isSQRingNeedEnter(flags);
+                isNeedEnter = true;
+            }
+            if (!isNeedEnter) return cqe;
+
+            const int result = detail::__sys_io_uring_enter2(
+                ring_fd, data.submit, data.waitNum, flags, (sigset_t *)data.arg,
+                data.size);
+            
+            if (result < 0) 
+                // TODO Reconsider whether to use exceptions
+                throw std::system_error{
+                    errno, std::system_category(), "getCQEntry_impl.2"};
+            data.submit -= result;
+            if (cqe != nullptr) return cqe;
+        }
+    }
+
+    inline CQEntry *
+    getCQEntry(unsigned submit, unsigned waitNum, sigset_t *sigmask) {
+        detail::CQEGetter data{
+            .submit = submit,
+            .waitNum = waitNum,
+            .getFlags = 0,
+            .size = _NSIG / 8,
+            .arg = sigmask};
+        return getCQEntry(data);
     }
 };
 

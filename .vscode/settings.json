@@ -55,6 +55,7 @@
         "limits": "cpp",
         "numbers": "cpp",
         "cinttypes": "cpp",
-        "span": "cpp"
+        "span": "cpp",
+        "stat.h": "c"
     }
 }

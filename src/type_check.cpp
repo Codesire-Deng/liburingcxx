@@ -1,5 +1,5 @@
 /*
- *  A tester using liburingcxx.
+ *  A type tester of liburingcxx.
  *
  *  Copyright (C) 2022 Zifeng Deng
  *
@@ -24,10 +24,6 @@
 int main(int argc, char *argv[]) {
     using std::cout, std::endl;
 
-    cout << "1:\n";
-    { liburingcxx::URing ring{8, 0}; }
-    cout << "2:\n";
-
     using namespace liburingcxx;
     using namespace detail;
     using namespace std;
@@ -44,6 +40,8 @@ int main(int argc, char *argv[]) {
     static_assert(sizeof(URing) == sizeof(io_uring));
     static_assert(sizeof(io_uring_sq) == sizeof(SubmissionQueue));
     static_assert(sizeof(io_uring_cq) == sizeof(CompletionQueue));
+
+    cout << "All test passed!\n";
 
     return 0;
 }
