@@ -229,6 +229,7 @@ class CQEntry : private io_uring_cqe {
   public:
     friend class ::liburingcxx::URing;
     inline uint64_t getData() const noexcept { return this->user_data; }
+    inline int32_t getRes() const noexcept { return this->res; }
 };
 
 namespace detail {
