@@ -30,10 +30,8 @@ int main(int argc, char *argv[]) {
     static_assert(is_standard_layout_v<URing<0>> && !is_trivial_v<URing<0>>);
     static_assert(is_standard_layout_v<SQEntry> && is_trivial_v<SQEntry>);
     static_assert(is_standard_layout_v<CQEntry> && is_trivial_v<CQEntry>);
-    static_assert(
-        is_standard_layout_v<SubmissionQueue> && is_trivial_v<SubmissionQueue>);
-    static_assert(
-        is_standard_layout_v<CompletionQueue> && is_trivial_v<CompletionQueue>);
+    static_assert(is_standard_layout_v<SubmissionQueue> && is_trivial_v<SubmissionQueue>);
+    static_assert(is_standard_layout_v<CompletionQueue> && is_trivial_v<CompletionQueue>);
 
     static_assert(sizeof(io_uring_sqe) == sizeof(SQEntry));
     static_assert(sizeof(io_uring_cqe) == sizeof(CQEntry));
