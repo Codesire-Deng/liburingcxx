@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include <iostream>
-#include "uring.hpp"
+#include "uring/uring.hpp"
 #include <type_traits>
 #include <liburing.h>
 
@@ -36,8 +36,8 @@ int main(int argc, char *argv[]) {
     static_assert(sizeof(io_uring_sqe) == sizeof(SQEntry));
     static_assert(sizeof(io_uring_cqe) == sizeof(CQEntry));
     // static_assert(sizeof(URing) == sizeof(io_uring));
-    static_assert(sizeof(io_uring_sq) == sizeof(SubmissionQueue));
-    static_assert(sizeof(io_uring_cq) == sizeof(CompletionQueue));
+    static_assert(sizeof(io_uring_sq) != sizeof(SubmissionQueue));
+    static_assert(sizeof(io_uring_cq) != sizeof(CompletionQueue));
 
     cout << "All test passed!\n";
 
