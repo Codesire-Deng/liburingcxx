@@ -27,17 +27,17 @@ int main(int argc, char *argv[]) {
     using namespace liburingcxx;
     using namespace detail;
     using namespace std;
-    static_assert(is_standard_layout_v<URing<0>> && !is_trivial_v<URing<0>>);
-    static_assert(is_standard_layout_v<SQEntry> && is_trivial_v<SQEntry>);
-    static_assert(is_standard_layout_v<CQEntry> && is_trivial_v<CQEntry>);
-    static_assert(is_standard_layout_v<SubmissionQueue> && is_trivial_v<SubmissionQueue>);
-    static_assert(is_standard_layout_v<CompletionQueue> && is_trivial_v<CompletionQueue>);
+    static_assert(is_standard_layout_v<uring<0>> && !is_trivial_v<uring<0>>);
+    static_assert(is_standard_layout_v<sq_entry> && is_trivial_v<sq_entry>);
+    static_assert(is_standard_layout_v<cq_entry> && is_trivial_v<cq_entry>);
+    static_assert(is_standard_layout_v<submission_queue> && is_trivial_v<submission_queue>);
+    static_assert(is_standard_layout_v<completion_queue> && is_trivial_v<completion_queue>);
 
-    static_assert(sizeof(io_uring_sqe) == sizeof(SQEntry));
-    static_assert(sizeof(io_uring_cqe) == sizeof(CQEntry));
-    // static_assert(sizeof(URing) == sizeof(io_uring));
-    static_assert(sizeof(io_uring_sq) != sizeof(SubmissionQueue));
-    static_assert(sizeof(io_uring_cq) != sizeof(CompletionQueue));
+    static_assert(sizeof(io_uring_sqe) == sizeof(sq_entry));
+    static_assert(sizeof(io_uring_cqe) == sizeof(cq_entry));
+    // static_assert(sizeof(uring) == sizeof(io_uring));
+    static_assert(sizeof(io_uring_sq) != sizeof(submission_queue));
+    static_assert(sizeof(io_uring_cq) != sizeof(completion_queue));
 
     cout << "All test passed!\n";
 

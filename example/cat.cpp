@@ -25,22 +25,23 @@
 
 constexpr unsigned BLOCK_SZ = 1024;
 
-struct FileInfo {
+struct file_info {
     size_t size;
     iovec iovecs[];
 };
 
-constexpr int countBlocks(size_t size, unsigned block_sz) noexcept {
+constexpr int count_blocks(size_t size, unsigned block_sz) noexcept {
     return size / block_sz + ((size / block_sz * block_sz) != size);
 }
 
 void output(std::string_view s) noexcept {
-    for (char c : s) putchar(c);
+    for (char c : s)
+        putchar(c);
 }
 
-using URing = liburingcxx::URing<0>;
+using uring = liburingcxx::uring<0>;
 
-void submitReadRequest(URing &ring, const std::filesystem::path path) {
+void submit_read_request(uring &ring, const std::filesystem::path path) {
     // open the file
     int file_fd = open(path.c_str(), O_RDONLY);
     if (file_fd < 0) {
@@ -49,12 +50,12 @@ void submitReadRequest(URing &ring, const std::filesystem::path path) {
 
     // calculate the file size then malloc iovecs
     const size_t file_size = std::filesystem::file_size(path);
-    const unsigned blocks = countBlocks(file_size, BLOCK_SZ);
-    FileInfo *fi = (FileInfo *)malloc(sizeof(*fi) + (blocks * sizeof(iovec)));
+    const unsigned blocks = count_blocks(file_size, BLOCK_SZ);
+    file_info *fi = (file_info *)malloc(sizeof(*fi) + (blocks * sizeof(iovec)));
     fi->size = file_size;
 
     // malloc buffers (to later let the ring fill them asynchronously)
-    for (size_t rest = file_size, offset = 0, i = 0; rest != 0; ++i) {
+    for (size_t rest = file_size, i = 0; rest != 0; ++i) {
         size_t to_read = std::min<size_t>(rest, BLOCK_SZ);
         fi->iovecs[i].iov_len = to_read;
         if (posix_memalign(&fi->iovecs[i].iov_base, BLOCK_SZ, BLOCK_SZ) != 0) {
@@ -65,30 +66,31 @@ void submitReadRequest(URing &ring, const std::filesystem::path path) {
     }
 
     // submit the read request
-    liburingcxx::SQEntry &sqe = *ring.getSQEntry();
-    sqe.prepareReadv(file_fd, std::span{fi->iovecs, blocks}, 0)
-        .setData(reinterpret_cast<uint64_t>(fi));
+    liburingcxx::sq_entry &sqe = *ring.get_sq_entry();
+    sqe.prepare_readv(file_fd, std::span{fi->iovecs, blocks}, 0)
+        .set_data(reinterpret_cast<uint64_t>(fi));
 
     // Must be called after any request (except for polling mode)
-    ring.appendSQEntry(&sqe);
+    ring.append_sq_entry(&sqe);
     ring.submit();
 }
 
-void waitResultAndPrint(URing &ring) {
+void wait_result_and_print(uring &ring) {
     // get a result from the ring
-    liburingcxx::CQEntry &cqe = *ring.waitCQEntry();
+    const liburingcxx::cq_entry *cqe;
+    [[maybe_unused]] int err = ring.wait_cq_entry(cqe);
 
     // get the according data
-    FileInfo *fi = reinterpret_cast<FileInfo *>(cqe.getData());
+    file_info *fi = reinterpret_cast<file_info *>(cqe->user_data);
 
     // print the data to console
-    const int blocks = countBlocks(fi->size, BLOCK_SZ);
+    const int blocks = count_blocks(fi->size, BLOCK_SZ);
     for (int i = 0; i < blocks; ++i) {
         output({(char *)fi->iovecs[i].iov_base, fi->iovecs[i].iov_len});
     }
 
     // Must be called after consuming a cqe
-    ring.SeenCQEntry(&cqe);
+    ring.seen_cq_entry(cqe);
 }
 
 int main(int argc, char *argv[]) {
@@ -99,17 +101,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    URing ring{4};
+    uring ring{4};
 
     for (int i = 1; i < argc; ++i) {
         try {
             // put read request into the ring
-            submitReadRequest(ring, argv[i]);
+            submit_read_request(ring, argv[i]);
             // get string from the ring, and output to console
-            waitResultAndPrint(ring);
+            wait_result_and_print(ring);
         } catch (const std::system_error &e) {
             cerr << e.what() << "\n" << e.code() << "\n";
-        } catch (const std::exception &e) { cerr << e.what() << '\n'; }
+        } catch (const std::exception &e) {
+            cerr << e.what() << '\n';
+        }
     }
 
     return 0;

@@ -13,13 +13,13 @@ AlignTrailingComments: true
 AllowAllArgumentsOnNextLine: true
 AllowAllConstructorInitializersOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
-AllowShortBlocksOnASingleLine: Always
+AllowShortBlocksOnASingleLine: Empty
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortEnumsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortLambdasOnASingleLine: Inline
-AllowShortLoopsOnASingleLine: true
+AllowShortLoopsOnASingleLine: false
 AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: Yes
 BinPackArguments: true
@@ -44,14 +44,14 @@ IndentExternBlock: Indent
 IndentGotoLabels: true
 IndentPPDirectives: None
 # IndentPragmas: false
-IndentRequires: true
+IndentRequires: true # llvm 14
 IndentWrappedFunctionNames: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: Inner
 PointerAlignment: Right
 ReflowComments: true
-RequiresClausePosition: OwnLine
+# RequiresClausePosition: OwnLine # llvm 15
 SeparateDefinitionBlocks: Always
 ShortNamespaceLines: 5
 SortIncludes:    false

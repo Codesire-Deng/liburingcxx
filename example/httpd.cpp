@@ -30,9 +30,9 @@ struct request {
     struct iovec iov[];
 };
 
-using URing = liburingcxx::URing<0>;
+using uring = liburingcxx::uring<0>;
 
-URing ring{QUEUE_DEPTH};
+uring ring{QUEUE_DEPTH};
 
 const char *unimplemented_content =
     "HTTP/1.0 400 Bad Request\r\n"
@@ -121,7 +121,8 @@ void check_for_index_file() {
  * */
 
 void strtolower(char *str) {
-    for (; *str; ++str) *str = (char)tolower(*str);
+    for (; *str; ++str)
+        *str = (char)tolower(*str);
 }
 
 /*
@@ -153,7 +154,7 @@ int setup_listening_socket(int port) {
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0)
         fatal_error("setsockopt(SO_REUSEADDR)");
 
-    memset(&srv_addr, 0, sizeof(srv_addr));
+    std::memset(&srv_addr, 0, sizeof(srv_addr));
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(port);
     srv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -174,44 +175,44 @@ int add_accept_request(
     struct sockaddr_in *client_addr,
     socklen_t *client_addr_len
 ) {
-    auto &sqe = *ring.getSQEntry();
-    sqe.prepareAccept(
+    auto &sqe = *ring.get_sq_entry();
+    sqe.prepare_accept(
         server_socket, reinterpret_cast<sockaddr *>(client_addr),
         client_addr_len, 0
     );
 
     struct request *req = (request *)malloc(sizeof(*req));
     req->event_type = EVENT_TYPE_ACCEPT;
-    sqe.setData((uint64_t)req);
-    ring.appendSQEntry(&sqe);
+    sqe.set_data((uint64_t)req);
+    ring.append_sq_entry(&sqe);
     ring.submit();
 
     return 0;
 }
 
 int add_read_request(int client_socket) {
-    auto &sqe = *ring.getSQEntry();
+    auto &sqe = *ring.get_sq_entry();
     struct request *req =
         (request *)malloc(sizeof(*req) + sizeof(struct iovec));
     req->iov[0].iov_base = malloc(READ_SZ);
     req->iov[0].iov_len = READ_SZ;
     req->event_type = EVENT_TYPE_READ;
     req->client_socket = client_socket;
-    memset(req->iov[0].iov_base, 0, READ_SZ);
+    std::memset(req->iov[0].iov_base, 0, READ_SZ);
     /* Linux kernel 5.5 has support for readv, but not for recv() or read() */
-    sqe.prepareReadv(client_socket, {req->iov, 1}, 0);
-    sqe.setData((uint64_t)req);
-    ring.appendSQEntry(&sqe);
+    sqe.prepare_readv(client_socket, {req->iov, 1}, 0);
+    sqe.set_data((uint64_t)req);
+    ring.append_sq_entry(&sqe);
     ring.submit();
     return 0;
 }
 
 int add_write_request(struct request *req) {
-    auto &sqe = *ring.getSQEntry();
+    auto &sqe = *ring.get_sq_entry();
     req->event_type = EVENT_TYPE_WRITE;
-    sqe.prepareWritev(req->client_socket, {req->iov, req->iovec_count}, 0);
-    sqe.setData((uint64_t)req);
-    ring.appendSQEntry(&sqe);
+    sqe.prepare_writev(req->client_socket, {req->iov, req->iovec_count}, 0);
+    sqe.set_data((uint64_t)req);
+    ring.append_sq_entry(&sqe);
     ring.submit();
     return 0;
 }
@@ -262,7 +263,9 @@ void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
 
     /* We should really check for short reads here */
     int ret = read(fd, buf, file_size);
-    if (ret < file_size) { fprintf(stderr, "Encountered a short read.\n"); }
+    if (ret < file_size) {
+        fprintf(stderr, "Encountered a short read.\n");
+    }
     close(fd);
 
     iov->iov_base = buf;
@@ -446,15 +449,15 @@ void server_loop(int server_socket) {
 
     add_accept_request(server_socket, &client_addr, &client_addr_len);
 
-    liburingcxx::CQEntry *cqe;
+    const liburingcxx::cq_entry *cqe;
     while (1) {
-        cqe = ring.waitCQEntry();
-        struct request *req = (struct request *)cqe->getData();
+        [[maybe_unused]] int err = ring.wait_cq_entry(cqe);
+        struct request *req = (struct request *)cqe->user_data;
         // if (ret < 0) fatal_error("io_uring_wait_cqe");
-        if (cqe->getRes() < 0) {
+        if (cqe->res < 0) {
             fprintf(
                 stderr, "Async request failed: %s for event: %d\n",
-                strerror(-cqe->getRes()), req->event_type
+                strerror(-cqe->res), req->event_type
             );
             exit(1);
         }
@@ -464,11 +467,11 @@ void server_loop(int server_socket) {
                 add_accept_request(
                     server_socket, &client_addr, &client_addr_len
                 );
-                add_read_request(cqe->getRes());
+                add_read_request(cqe->res);
                 free(req);
                 break;
             case EVENT_TYPE_READ:
-                if (!cqe->getRes()) {
+                if (!cqe->res) {
                     fprintf(stderr, "Empty request!\n");
                     break;
                 }
@@ -477,7 +480,7 @@ void server_loop(int server_socket) {
                 free(req);
                 break;
             case EVENT_TYPE_WRITE:
-                for (int i = 0; i < req->iovec_count; i++) {
+                for (unsigned i = 0; i < req->iovec_count; i++) {
                     free(req->iov[i].iov_base);
                 }
                 close(req->client_socket);
@@ -485,7 +488,7 @@ void server_loop(int server_socket) {
                 break;
         }
         /* Mark this request as processed */
-        ring.SeenCQEntry(cqe);
+        ring.seen_cq_entry(cqe);
     }
 }
 
@@ -495,7 +498,9 @@ void sigint_handler(int signo) {
 }
 
 int main() {
-    if (check_kernel_version()) { return EXIT_FAILURE; }
+    if (check_kernel_version()) {
+        return EXIT_FAILURE;
+    }
     check_for_index_file();
     int server_socket = setup_listening_socket(DEFAULT_SERVER_PORT);
     printf("ZeroHTTPd listening on port: %d\n", DEFAULT_SERVER_PORT);
