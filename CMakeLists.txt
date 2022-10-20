@@ -2,14 +2,13 @@ cmake_minimum_required(VERSION 3.10.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_C_STANDARD 17)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
     message("Setting default CMAKE_BUILD_TYPE to Release")
 endif()
 
-project(liburingcxx VERSION 0.5.0 LANGUAGES C CXX)
+project(liburingcxx VERSION 0.5.1 LANGUAGES C CXX)
 
 if (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     message(WARNING "io_uring is only supported by Linux, but the target OS is ${CMAKE_SYSTEM_NAME}.")
