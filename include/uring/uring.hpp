@@ -21,19 +21,28 @@
 #define _XOPEN_SOURCE 500 /* Required for glibc to expose sigset_t */
 #endif
 
-#include "uring/compat.h"
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* Required for musl to expose cpu_set_t */
+#endif
+
+#include "uring/cq_entry.hpp"
 #include "uring/barrier.h"
 #include "uring/buf_ring.hpp"
+#include "uring/compat.h"
 #include "uring/detail/cq.hpp"
 #include "uring/detail/int_flags.h"
 #include "uring/detail/sq.hpp"
 #include "uring/io_uring.h"
 #include "uring/syscall.hpp"
+#include "uring/uring_define.hpp"
 #include "uring/utility/kernel_version.hpp"
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <cinttypes>
+#include <concepts>
 #include <csignal>
+#include <cstdint>
 #include <ctime>
 #include <linux/swab.h>
 #include <sched.h>
@@ -42,6 +51,8 @@
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <system_error>
+#include <type_traits>
+#include <utility>
 
 struct statx;
 
@@ -77,13 +88,13 @@ struct uring_params final : io_uring_params {
     }
 };
 
-struct __peek_cq_entry_return_type final {
+struct __peek_cq_entry_return_type /*NOLINT*/ final {
     const cq_entry *cqe;
     unsigned available_num;
     int err;
 };
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 class [[nodiscard]] uring final {
   public:
     using params = uring_params;
@@ -95,7 +106,7 @@ class [[nodiscard]] uring final {
     submission_queue sq;
     completion_queue cq;
     // unsigned flags; // is now uring_flags
-    int ring_fd;
+    int ring_fd = -1;
 
     unsigned features;
     int enter_ring_fd;
@@ -121,11 +132,11 @@ class [[nodiscard]] uring final {
 
     int get_events() noexcept;
 
-    unsigned sq_pending() const noexcept;
+    [[nodiscard]] unsigned sq_pending() const noexcept;
 
-    unsigned sq_space_left() const noexcept;
+    [[nodiscard]] unsigned sq_space_left() const noexcept;
 
-    unsigned get_sq_ring_entries() const noexcept;
+    [[nodiscard]] unsigned get_sq_ring_entries() const noexcept;
 
     [[nodiscard]] sq_entry *get_sq_entry() noexcept;
 
@@ -133,9 +144,9 @@ class [[nodiscard]] uring final {
 
     int wait_sq_ring();
 
-    unsigned cq_ready_relaxed() const noexcept;
+    [[nodiscard]] unsigned cq_ready_relaxed() const noexcept;
 
-    unsigned cq_ready_acquire() const noexcept;
+    [[nodiscard]] unsigned cq_ready_acquire() const noexcept;
 
     int wait_cq_entry(const cq_entry *(&cqe_ptr)) noexcept;
 
@@ -155,6 +166,20 @@ class [[nodiscard]] uring final {
     ) noexcept;
 #endif
 
+    template<typename F>
+        requires std::regular_invocable<F, cq_entry *>
+                 && std::is_void_v<std::invoke_result_t<F, cq_entry *>>
+    unsigned for_each_cqe(F f) noexcept(noexcept(f(std::declval<cq_entry *>()))
+    ) {
+        unsigned count = 0;
+        for (auto head = *cq.khead; head != io_uring_smp_load_acquire(cq.ktail);
+             ++head, ++count) {
+            cq_entry *const cqe = &cq.cqe_at<uring_flags>(head);
+            f(cqe);
+        }
+        return count;
+    }
+
     void cq_advance(unsigned num) noexcept;
 
     void seen_cq_entry(const cq_entry *cqe) noexcept;
@@ -163,12 +188,19 @@ class [[nodiscard]] uring final {
 
     int unregister_ring_fd();
 
+    [[nodiscard]] bool is_cq_ring_need_enter() const noexcept;
+
   public:
-    uring(unsigned entries, params &params);
+    /**
+     * @brief Init the io_uring.
+     * @note Must be call on the Corresponding thread. (Ring per thread)
+     * @param entries The size of sq ring. Must be pow of 2.
+     */
+    void init(unsigned entries);
+    void init(unsigned entries, params &params);
+    void init(unsigned entries, params &&params);
 
-    uring(unsigned entries, params &&params) : uring(entries, params) {}
-
-    uring(unsigned entries) : uring(entries, params{uring_flags}) {}
+    explicit uring() noexcept = default;
 
     /**
      * ban all copying or moving
@@ -181,8 +213,9 @@ class [[nodiscard]] uring final {
     ~uring() noexcept;
 
   private:
-    int
-    __submit(unsigned submitted, unsigned wait_num, bool getevents) noexcept;
+    int __submit /*NOLINT*/ (
+        unsigned submitted, unsigned wait_num, bool getevents
+    ) noexcept;
 
     void mmap_queue(int fd, params &p);
 
@@ -191,20 +224,19 @@ class [[nodiscard]] uring final {
     constexpr bool is_sq_ring_need_enter(unsigned submit, unsigned &enter_flags)
         const noexcept;
 
-    bool is_cq_ring_need_flush() const noexcept;
-
-    bool is_cq_ring_need_enter() const noexcept;
+    [[nodiscard]] bool is_cq_ring_need_flush() const noexcept;
 
     void buf_ring_cq_advance(buf_ring &br, unsigned count) noexcept;
 
-    __peek_cq_entry_return_type __peek_cq_entry() noexcept;
+    // NOLINTNEXTLINE
+    [[nodiscard]] __peek_cq_entry_return_type __peek_cq_entry() noexcept;
 
     template<bool has_ts>
-    int _get_cq_entry(
+    int _get_cq_entry /*NOLINT*/ (
         const cq_entry *(&cqe_ptr), detail::cq_entry_getter &data
     ) noexcept;
 
-    int __get_cq_entry(
+    int __get_cq_entry /*NOLINT*/ (
         const cq_entry *(&cqe_ptr),
         unsigned submit,
         unsigned wait_num,
@@ -231,7 +263,7 @@ class [[nodiscard]] uring final {
  *
  * @return unsigned number of sqes submitted
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::submit() noexcept {
     return submit_and_wait(0);
 }
@@ -241,13 +273,13 @@ inline int uring<uring_flags>::submit() noexcept {
  *
  * @return unsigned number of sqes submitted
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::submit_and_wait(unsigned wait_num) noexcept {
     return __submit(sq.template flush<uring_flags>(), wait_num, false);
 }
 
 #if LIBURINGCXX_IS_KERNEL_REACH(5, 11)
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::submit_and_wait_timeout(
     const cq_entry *(&cqe),
     unsigned wait_num,
@@ -257,9 +289,9 @@ inline int uring<uring_flags>::submit_and_wait_timeout(
     assert(this->features & IORING_FEAT_EXT_ARG);
 
     io_uring_getevents_arg arg = {
-        .sigmask = (unsigned long)sigmask,
+        .sigmask = (uint64_t)sigmask,
         .sigmask_sz = _NSIG / 8,
-        .ts = (unsigned long)(&ts)};
+        .ts = (uint64_t)(&ts)};
 
     detail::cq_entry_getter data = {
         .submit = sq.template flush<uring_flags>(),
@@ -272,12 +304,12 @@ inline int uring<uring_flags>::submit_and_wait_timeout(
 }
 #endif
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::submit_and_get_events() noexcept {
     return __submit(sq.template flush<uring_flags>(), 0, true);
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::get_events() noexcept {
     constexpr int flags =
         IORING_ENTER_GETEVENTS | config::default_enter_flags_registered_ring;
@@ -288,7 +320,7 @@ inline int uring<uring_flags>::get_events() noexcept {
  * @brief Returns number of unconsumed (if SQPOLL) or unsubmitted
  * entries exist in the SQ ring
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline unsigned uring<uring_flags>::sq_pending() const noexcept {
     return sq.template pending<uring_flags>();
 }
@@ -298,12 +330,12 @@ inline unsigned uring<uring_flags>::sq_pending() const noexcept {
  *
  * @return unsigned the available space in SQ ring
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline unsigned uring<uring_flags>::sq_space_left() const noexcept {
     return sq.ring_entries - sq_pending();
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline unsigned uring<uring_flags>::get_sq_ring_entries() const noexcept {
     return sq.ring_entries;
 }
@@ -317,7 +349,7 @@ inline unsigned uring<uring_flags>::get_sq_ring_entries() const noexcept {
  *
  * @return sq_entry* Returns a vacant sqe, or nullptr if we're full.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline sq_entry *uring<uring_flags>::get_sq_entry() noexcept {
     return sq.template get_sq_entry<uring_flags>();
 }
@@ -327,8 +359,15 @@ inline sq_entry *uring<uring_flags>::get_sq_entry() noexcept {
  *
  * @param sqe
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 void uring<uring_flags>::append_sq_entry(const sq_entry *sqe) noexcept {
+    if constexpr (!(uring_flags & uring_setup::sqe_reorder)) {
+        assert(
+            false
+            && "Please never call `append_sq_entry` "
+               "if `uring_setup::sqe_reorder` is disabled"
+        );
+    }
     sq.append_sq_entry(sqe);
 }
 
@@ -343,7 +382,7 @@ void uring<uring_flags>::append_sq_entry(const sq_entry *sqe) noexcept {
  *
  * @return Sorry, I don't know what is returned by the internal syscall.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::wait_sq_ring() {
     if constexpr (!(uring_flags & IORING_SETUP_SQPOLL)) {
         return 0;
@@ -372,7 +411,7 @@ inline int uring<uring_flags>::wait_sq_ring() {
 /**
  * @brief Return the number of cqes available for application.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline unsigned uring<uring_flags>::cq_ready_relaxed() const noexcept {
     return *cq.ktail - *cq.khead;
 }
@@ -380,7 +419,7 @@ inline unsigned uring<uring_flags>::cq_ready_relaxed() const noexcept {
 /**
  * @brief Return the number of cqes available for application.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline unsigned uring<uring_flags>::cq_ready_acquire() const noexcept {
     return io_uring_smp_load_acquire(cq.ktail) - *cq.khead;
 }
@@ -389,7 +428,7 @@ inline unsigned uring<uring_flags>::cq_ready_acquire() const noexcept {
  * @brief Return an IO completion, waiting for it if necessary. Returns 0 with
  * cqe_ptr filled in on success, -errno on failure.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::wait_cq_entry(const cq_entry *(&cqe_ptr)
 ) noexcept {
     auto [cqe, available_num, err] = __peek_cq_entry();
@@ -405,7 +444,7 @@ inline int uring<uring_flags>::wait_cq_entry(const cq_entry *(&cqe_ptr)
  * @brief Return an IO completion, if one is readily available. Returns 0 with
  * cqe_ptr filled in on success, -errno on failure.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::peek_cq_entry(const cq_entry *(&cqe_ptr)
 ) noexcept {
     auto [cqe, available_num, err] = __peek_cq_entry();
@@ -421,7 +460,7 @@ inline int uring<uring_flags>::peek_cq_entry(const cq_entry *(&cqe_ptr)
  * @brief Fill in an array of IO completions up to count, if any are available.
  * Returns the amount of IO completions filled.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 unsigned
 uring<uring_flags>::peek_batch_cq_entries(std::span<const cq_entry *> cqes
 ) noexcept {
@@ -455,7 +494,7 @@ again:
     return 0;
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::wait_cq_entry_num(
     const cq_entry *(&cqe_ptr), unsigned wait_num
 ) noexcept {
@@ -468,7 +507,7 @@ inline int uring<uring_flags>::wait_cq_entry_num(
 /**
  * Kernel version 5.11 or newer is required!
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::wait_cq_entries(
     const cq_entry *(&cqe_ptr),
     unsigned wait_num,
@@ -480,15 +519,17 @@ inline int uring<uring_flags>::wait_cq_entries(
 }
 #endif
 
-template<unsigned uring_flags>
-inline void uring<uring_flags>::seen_cq_entry(const cq_entry *cqe) noexcept {
+template<uint64_t uring_flags>
+inline void
+uring<uring_flags>::seen_cq_entry([[maybe_unused]] const cq_entry *cqe
+) noexcept {
     assert(cqe != nullptr);
     cq_advance(1);
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 int uring<uring_flags>::register_ring_fd() {
-    assert(config::using_register_ring_fd && "kernel version < 5.18");
+    assert(config::using_register_ring_fd && "kernel version < 5.18"); // NOLINT
 
     struct io_uring_rsrc_update up = {
         .offset = -1U,
@@ -510,9 +551,9 @@ int uring<uring_flags>::register_ring_fd() {
     return ret;
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 int uring<uring_flags>::unregister_ring_fd() {
-    assert(config::using_register_ring_fd && "kernel version < 5.18");
+    assert(config::using_register_ring_fd && "kernel version < 5.18"); // NOLINT
 
     struct io_uring_rsrc_update up = {
         .offset = this->enter_ring_fd,
@@ -533,18 +574,21 @@ int uring<uring_flags>::unregister_ring_fd() {
     return ret;
 }
 
-template<unsigned uring_flags>
-uring<uring_flags>::uring(unsigned entries, params &params) {
+template<uint64_t uring_flags>
+void uring<uring_flags>::init(unsigned entries, params &params) {
+    assert(this->ring_fd == -1 && "The uring may be inited twice.");
+
     // override the params.flags
-    params.flags = uring_flags;
+    params.flags = static_cast<uint32_t>(uring_flags);
+
     const int fd = __sys_io_uring_setup(entries, &params);
     if (fd < 0) [[unlikely]] {
         throw std::system_error{
             -fd, std::system_category(), "uring()::__sys_io_uring_setup"};
     }
 
-    std::memset(this, 0, sizeof(*this));
-    // this->flags = params.flags;
+    std::memset(this, 0, sizeof(*this)); // NOLINT
+
     this->ring_fd = this->enter_ring_fd = fd;
     this->features = params.features;
     this->int_flags = 0;
@@ -560,8 +604,21 @@ uring<uring_flags>::uring(unsigned entries, params &params) {
     }
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
+void uring<uring_flags>::init(unsigned entries, params &&params) {
+    init(entries, params);
+}
+
+template<uint64_t uring_flags>
+void uring<uring_flags>::init(unsigned entries) {
+    init(entries, params{static_cast<uint32_t>(uring_flags)});
+}
+
+template<uint64_t uring_flags>
 uring<uring_flags>::~uring() noexcept {
+    if (this->ring_fd == -1) {
+        return;
+    }
     __sys_munmap(sq.sqes, sq.ring_entries * sizeof(io_uring_sqe));
     unmap_rings();
     __sys_close(ring_fd);
@@ -572,7 +629,7 @@ uring<uring_flags>::~uring() noexcept {
  *
  * @return number of sqes submitted
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 int uring<uring_flags>::__submit(
     unsigned submitted, unsigned wait_num, bool getevents
 ) noexcept {
@@ -593,9 +650,9 @@ int uring<uring_flags>::__submit(
         );
 
         return consumed_num;
-    } else {
-        return submitted;
     }
+
+    return (int)submitted;
 }
 
 /**
@@ -604,7 +661,7 @@ int uring<uring_flags>::__submit(
  * @param fd fd of io_uring in kernel
  * @param p params describing the shape of ring
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 void uring<uring_flags>::mmap_queue(int fd, params &p) {
     sq.ring_sz = p.sq_off.array + p.sq_entries * sizeof(unsigned);
     cq.ring_sz = p.cq_off.cqes + p.cq_entries * sizeof(io_uring_cqe);
@@ -617,7 +674,7 @@ void uring<uring_flags>::mmap_queue(int fd, params &p) {
         nullptr, sq.ring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
         fd, IORING_OFF_SQ_RING
     );
-    if (sq.ring_ptr == MAP_FAILED) [[unlikely]] {
+    if (sq.ring_ptr == MAP_FAILED) /*NOLINT*/ [[unlikely]] {
         throw std::system_error{
             errno, std::system_category(), "sq.ring MAP_FAILED"};
     }
@@ -629,7 +686,7 @@ void uring<uring_flags>::mmap_queue(int fd, params &p) {
             nullptr, cq.ring_sz, PROT_READ | PROT_WRITE,
             MAP_SHARED | MAP_POPULATE, fd, IORING_OFF_CQ_RING
         );
-        if (cq.ring_ptr == MAP_FAILED) [[unlikely]] {
+        if (cq.ring_ptr == MAP_FAILED) /*NOLINT*/ [[unlikely]] {
             // don't forget to clean up sq
             cq.ring_ptr = nullptr;
             unmap_rings();
@@ -642,10 +699,10 @@ void uring<uring_flags>::mmap_queue(int fd, params &p) {
 
     const size_t sqes_size = p.sq_entries * sizeof(io_uring_sqe);
     sq.sqes = reinterpret_cast<sq_entry *>(__sys_mmap(
-        0, sqes_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd,
-        IORING_OFF_SQES
+        nullptr, sqes_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+        fd, IORING_OFF_SQES
     ));
-    if (sq.sqes == MAP_FAILED) [[unlikely]] {
+    if (sq.sqes == MAP_FAILED) /*NOLINT*/ [[unlikely]] {
         unmap_rings();
         throw std::system_error{
             errno, std::system_category(), "sq.sqes MAP_FAILED"};
@@ -654,7 +711,7 @@ void uring<uring_flags>::mmap_queue(int fd, params &p) {
     cq.set_offset(p.cq_off);
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline void uring<uring_flags>::unmap_rings() noexcept {
     __sys_munmap(sq.ring_ptr, sq.ring_sz);
     if (cq.ring_ptr && cq.ring_ptr != sq.ring_ptr) {
@@ -662,7 +719,7 @@ inline void uring<uring_flags>::unmap_rings() noexcept {
     }
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline constexpr bool uring<uring_flags>::is_sq_ring_need_enter(
     unsigned submit, unsigned &enter_flags
 ) const noexcept {
@@ -689,13 +746,13 @@ inline constexpr bool uring<uring_flags>::is_sq_ring_need_enter(
     return false;
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline bool uring<uring_flags>::is_cq_ring_need_flush() const noexcept {
     return IO_URING_READ_ONCE(*sq.kflags)
            & (IORING_SQ_CQ_OVERFLOW | IORING_SQ_TASKRUN);
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline bool uring<uring_flags>::is_cq_ring_need_enter() const noexcept {
     if constexpr (uring_flags & IORING_SETUP_IOPOLL) {
         return true;
@@ -704,13 +761,13 @@ inline bool uring<uring_flags>::is_cq_ring_need_enter() const noexcept {
     }
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline void uring<uring_flags>::cq_advance(unsigned num) noexcept {
     assert(num > 0 && "cq_advance: num must be positive.");
     io_uring_smp_store_release(cq.khead, *cq.khead + num);
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline void
 uring<uring_flags>::buf_ring_cq_advance(buf_ring &br, unsigned count) noexcept {
     br.tail += count;
@@ -720,13 +777,10 @@ uring<uring_flags>::buf_ring_cq_advance(buf_ring &br, unsigned count) noexcept {
 /*
  * Internal helper, don't use directly in applications.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 __peek_cq_entry_return_type uring<uring_flags>::__peek_cq_entry() noexcept {
     __peek_cq_entry_return_type ret;
     ret.err = 0;
-
-    constexpr int shift = bool(uring_flags & IORING_SETUP_CQE32) ? 1 : 0;
-    const unsigned mask = cq.ring_mask;
 
     while (true) {
         const unsigned tail = io_uring_smp_load_acquire(cq.ktail);
@@ -738,7 +792,7 @@ __peek_cq_entry_return_type uring<uring_flags>::__peek_cq_entry() noexcept {
             break;
         }
 
-        ret.cqe = cq.cqes + ((head & mask) << shift);
+        ret.cqe = &cq.cqe_at<uring_flags>(head);
         if (!(this->features & IORING_FEAT_EXT_ARG)
             && ret.cqe->user_data == LIBURING_UDATA_TIMEOUT) [[unlikely]] {
             if (ret.cqe->res < 0) [[unlikely]] {
@@ -757,9 +811,9 @@ __peek_cq_entry_return_type uring<uring_flags>::__peek_cq_entry() noexcept {
     return ret;
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 template<bool has_ts>
-int uring<uring_flags>::_get_cq_entry(
+int uring<uring_flags>::_get_cq_entry /*NOLINT*/ (
     const cq_entry *(&cqe_ptr), detail::cq_entry_getter &data
 ) noexcept {
     __peek_cq_entry_return_type peek_result;
@@ -847,7 +901,7 @@ int uring<uring_flags>::_get_cq_entry(
     return err;
 }
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::__get_cq_entry(
     const cq_entry *(&cqe_ptr),
     unsigned submit,
@@ -868,7 +922,7 @@ inline int uring<uring_flags>::__get_cq_entry(
  * If we have kernel support for IORING_ENTER_EXT_ARG, then we can use that
  * more efficiently than queueing an internal timeout command.
  */
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 inline int uring<uring_flags>::wait_cq_entries_new(
     const cq_entry *(&cqe_ptr),
     unsigned wait_num,
@@ -876,9 +930,9 @@ inline int uring<uring_flags>::wait_cq_entries_new(
     sigset_t *sigmask
 ) noexcept {
     io_uring_getevents_arg arg = {
-        .sigmask = (unsigned long)sigmask,
+        .sigmask = (uint64_t)sigmask,
         .sigmask_sz = _NSIG / 8,
-        .ts = (unsigned long)(&ts)};
+        .ts = (uint64_t)(&ts)};
 
     detail::cq_entry_getter data = {
         .wait_num = wait_num,

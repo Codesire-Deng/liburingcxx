@@ -101,7 +101,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    uring ring{4};
+    uring ring;
+    ring.init(8);
 
     for (int i = 1; i < argc; ++i) {
         try {

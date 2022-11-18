@@ -32,7 +32,7 @@ struct request {
 
 using uring = liburingcxx::uring<0>;
 
-uring ring{QUEUE_DEPTH};
+uring ring;
 
 const char *unimplemented_content =
     "HTTP/1.0 400 Bad Request\r\n"
@@ -96,7 +96,8 @@ int check_kernel_version() {
         "Minimum kernel version required is: %d.%d\n", MIN_KERNEL_VERSION,
         MIN_MAJOR_VERSION
     );
-    if (ver[0] >= MIN_KERNEL_VERSION && ver[1] >= MIN_MAJOR_VERSION) {
+    if (ver[0] > MIN_KERNEL_VERSION
+        || (ver[0] == MIN_KERNEL_VERSION && ver[1] >= MIN_MAJOR_VERSION)) {
         printf("Your kernel version is: %ld.%ld\n", ver[0], ver[1]);
         return 0;
     }
@@ -506,6 +507,7 @@ int main() {
     printf("ZeroHTTPd listening on port: %d\n", DEFAULT_SERVER_PORT);
 
     signal(SIGINT, sigint_handler);
+    ring.init(QUEUE_DEPTH);
     server_loop(server_socket);
 
     return 0;

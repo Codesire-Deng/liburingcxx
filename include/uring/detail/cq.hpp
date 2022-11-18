@@ -4,7 +4,7 @@
 
 namespace liburingcxx {
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 class uring;
 
 namespace detail {
@@ -30,6 +30,7 @@ namespace detail {
 
       private:
         void set_offset(const io_cqring_offsets &off) noexcept {
+            // NOLINTBEGIN
             khead = (unsigned *)((uintptr_t)ring_ptr + off.head);
             ktail = (unsigned *)((uintptr_t)ring_ptr + off.tail);
             ring_mask = *(unsigned *)((uintptr_t)ring_ptr + off.ring_mask);
@@ -40,13 +41,29 @@ namespace detail {
             }
             koverflow = (unsigned *)((uintptr_t)ring_ptr + off.overflow);
             cqes = (cq_entry *)((uintptr_t)ring_ptr + off.cqes);
+            // NOLINTEND
         }
 
       public:
-        template<unsigned uring_flags>
+        template<uint64_t uring_flags>
         friend class ::liburingcxx::uring;
         completion_queue() noexcept = default;
         ~completion_queue() noexcept = default;
+
+        template<uint64_t uring_flags>
+        [[nodiscard]] cq_entry &cqe_at(unsigned offset) noexcept {
+            constexpr int shift =
+                bool(uring_flags & IORING_SETUP_CQE32) ? 1 : 0;
+            return cqes[(offset & ring_mask) << shift];
+        }
+
+        template<uint64_t uring_flags>
+        [[nodiscard]] const cq_entry &const_cqe_at(unsigned offset
+        ) const noexcept {
+            constexpr int shift =
+                bool(uring_flags & IORING_SETUP_CQE32) ? 1 : 0;
+            return cqes[(offset & ring_mask) << shift];
+        }
     };
 
     struct cq_entry_getter {

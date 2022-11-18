@@ -2,12 +2,13 @@
 
 #include "uring/barrier.h"
 #include "uring/sq_entry.hpp"
+#include "uring/uring_define.hpp"
 #include <cassert>
 #include <numeric>
 
 namespace liburingcxx {
 
-template<unsigned uring_flags>
+template<uint64_t uring_flags>
 class uring;
 
 namespace detail {
@@ -37,6 +38,7 @@ namespace detail {
 
       private:
         void set_offset(const io_sqring_offsets &off) noexcept {
+            // NOLINTBEGIN
             khead = (unsigned *)((uintptr_t)ring_ptr + off.head);
             ktail = (unsigned *)((uintptr_t)ring_ptr + off.tail);
             ring_mask = *(unsigned *)((uintptr_t)ring_ptr + off.ring_mask);
@@ -45,6 +47,7 @@ namespace detail {
             kflags = (unsigned *)((uintptr_t)ring_ptr + off.flags);
             kdropped = (unsigned *)((uintptr_t)ring_ptr + off.dropped);
             array = (unsigned *)((uintptr_t)ring_ptr + off.array);
+            // NOLINTEND
         }
 
         void init_free_queue() noexcept {
@@ -57,7 +60,7 @@ namespace detail {
          * @return unsigned number of pending items in the SQ ring, for the
          * shared ring.
          */
-        template<unsigned uring_flags>
+        template<uint64_t uring_flags>
         unsigned flush() noexcept {
             if (sqe_tail != sqe_head) [[likely]] {
                 /*
@@ -93,9 +96,11 @@ namespace detail {
         /**
          * @brief Returns number of unconsumed (if SQPOLL) or unsubmitted
          * entries exist in the SQ ring
+         *
+         * same effect as `io_uring_sq_ready`
          */
-        template<unsigned uring_flags>
-        inline unsigned pending() const noexcept {
+        template<uint64_t uring_flags>
+        [[nodiscard]] inline unsigned pending() const noexcept {
             /*
              * Without a barrier, we could miss an update and think the SQ
              * wasn't ready. We don't need the load acquire for non-SQPOLL since
@@ -131,7 +136,7 @@ namespace detail {
          * The sqes from sqe_free_head(included) to khead(not included) are all
          * free and available for application.
          */
-        template<unsigned uring_flags>
+        template<uint64_t uring_flags>
         [[nodiscard]] inline sq_entry *get_sq_entry() noexcept {
             constexpr int shift =
                 bool(uring_flags & IORING_SETUP_SQE128) ? 1 : 0;
@@ -143,10 +148,19 @@ namespace detail {
                 head = io_uring_smp_load_acquire(khead);
             }
 
-            if (sqe_free_head - head < ring_entries) [[likely]] {
-                return &sqes[(array[sqe_free_head++ & ring_mask]) << shift];
+            if constexpr (uring_flags & uring_setup::sqe_reorder) {
+                if (sqe_free_head - head < ring_entries) [[likely]] {
+                    return &sqes[(array[sqe_free_head++ & ring_mask]) << shift];
+                } else {
+                    return nullptr;
+                }
             } else {
-                return nullptr;
+                // if `sqe_reorder` is not enabled:
+                if (sqe_tail - head < ring_entries) [[likely]] {
+                    return &sqes[(sqe_tail++ & ring_mask) << shift];
+                } else {
+                    return nullptr;
+                }
             }
         }
 
@@ -156,7 +170,7 @@ namespace detail {
         }
 
       public:
-        template<unsigned uring_flags>
+        template<uint64_t uring_flags>
         friend class ::liburingcxx::uring;
         submission_queue() noexcept = default;
         ~submission_queue() noexcept = default;
