@@ -8,7 +8,7 @@ if (NOT CMAKE_BUILD_TYPE)
     message("Setting default CMAKE_BUILD_TYPE to Release")
 endif()
 
-project(liburingcxx VERSION 0.5.1 LANGUAGES C CXX)
+project(liburingcxx VERSION 0.7.1 LANGUAGES C CXX)
 
 if (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     message(WARNING "io_uring is only supported by Linux, but the target OS is ${CMAKE_SYSTEM_NAME}.")
